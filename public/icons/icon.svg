@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Teal rounded background -->
+  <rect width="128" height="128" rx="26" fill="#0f766e"/>
+
+  <!-- Chimney (drawn before roof so roof overlaps cleanly) -->
+  <rect x="82" y="16" width="11" height="31" fill="white"/>
+
+  <!-- Roof -->
+  <polygon points="64,10 114,60 14,60" fill="white"/>
+
+  <!-- Walls -->
+  <rect x="22" y="57" width="84" height="61" fill="white"/>
+
+  <!-- Door -->
+  <rect x="50" y="72" width="28" height="46" rx="4" fill="#0f766e"/>
+
+  <!-- Left window -->
+  <rect x="31" y="66" width="15" height="14" rx="3" fill="#ccfbf1"/>
+
+  <!-- Right window -->
+  <rect x="82" y="66" width="15" height="14" rx="3" fill="#ccfbf1"/>
+
+  <!-- Upward trend line in the right-wall strip (below right window) -->
+  <polyline
+    points="83,113 90,102 96,108 103,90"
+    stroke="#0d9488"
+    stroke-width="3.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+  <!-- Arrow head -->
+  <polygon points="100,85 108,90 103,97" fill="#0d9488"/>
+</svg>

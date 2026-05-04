@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy policy — Rightmove Companion</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        line-height: 1.5;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        color: #1a1a1a;
+      }
+      h1 {
+        font-size: 1.5rem;
+      }
+      h2 {
+        font-size: 1.125rem;
+        margin-top: 1.75rem;
+      }
+      ul {
+        padding-left: 1.25rem;
+      }
+      .muted {
+        color: #555;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Privacy policy — Rightmove Companion</h1>
+    <p class="muted"><strong>Effective date:</strong> May 2026</p>
+
+    <h2>Summary</h2>
+    <p>
+      Rightmove Companion runs <strong>inside your browser</strong>. It stores your settings and saved data
+      <strong>locally</strong> on your device. It reads property listing pages you open and may
+      <strong>fetch public listing pages</strong> on other property sites to estimate rent comparables. It does
+      <strong>not</strong> sell your data.
+    </p>
+
+    <h2>Data stored on your device</h2>
+    <p>The extension uses <code>chrome.storage.local</code> to keep:</p>
+    <ul>
+      <li>default calculator inputs</li>
+      <li>drafts for the listing page you are viewing</li>
+      <li>saved properties and optional notes</li>
+      <li>simple UI preferences (for example whether the panel was open)</li>
+    </ul>
+    <p>
+      This data <strong>stays on your computer</strong> unless you use <strong>export</strong> yourself (for example to save a JSON backup file).
+    </p>
+
+    <h2>Data the extension accesses</h2>
+    <ul>
+      <li>
+        <strong>Rightmove</strong> pages you visit that match the extension’s content script (for-sale property URLs).
+        The extension reads the visible page to fill in price, address, and similar fields where the page exposes them.
+      </li>
+      <li>
+        <strong>Zoopla</strong> and <strong>PrimeLocation</strong> (only as <strong>network requests</strong> from the extension’s background service worker)
+        to gather <strong>public</strong> lettings search HTML used for rent comparable ranges. The extension does not read your accounts on those sites.
+      </li>
+    </ul>
+
+    <h2>Optional developer builds</h2>
+    <p>
+      If you build the extension yourself with a local <strong>LLM proxy</strong> URL, that proxy is <strong>your</strong> server.
+      The Chrome Web Store release build does <strong>not</strong> include localhost access or a baked-in proxy URL.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      <!-- Replace with your support channel before publishing -->
+      Questions about this policy: please use the contact option listed on the Rightmove Companion Chrome Web Store page or your publisher support email.
+    </p>
+
+    <h2>Changes</h2>
+    <p>We will note material updates here when what the extension collects or sends changes.</p>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+# Dependencies and build output.
+node_modules
+dist
+
+# Local env (never commit API URLs, keys, or personal paths).
+.env
+.env.*
+!.env.example
+
+# Local tooling / accidental files (do not publish).
+.claude/
+/Screenshot*.jpg
+
