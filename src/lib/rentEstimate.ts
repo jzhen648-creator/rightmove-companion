@@ -5,48 +5,29 @@
 //
 // All parsing is best-effort and fails gracefully — the user can always type rent manually.
 
-import type { RentComparable, RentEstimate } from "./types";
+import type { ListingRentProfile, RentComparable, RentEstimate } from "./types";
 import {
   deepFind,
   extractBedroomsFromComparableText,
+  extractFloorAreaSqFtFromComparableText,
+  inferComparablePropertyType,
+  isLikelyRoomOrHouseShareLetting,
   extractJsonObject,
   extractJsonObjectsFromScriptContent,
   parseComparablesFromJson,
   safeJsonParse,
   toPositiveNumber,
 } from "./rentalSearchHtmlParser";
+import { findPostcode } from "./ukPostcodeOutward";
 
 const POUND = "\u00A3";
+
+// Re-export for callers that imported from this module.
+export { findPostcode } from "./ukPostcodeOutward";
 
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
-
-export function findPostcode(text: string): string | null {
-  const fullMatch = text.match(/\b([A-Z]{1,2}\d{1,2}[A-Z]?)\s+(\d[A-Z]{2})\b/i);
-  if (fullMatch) {
-    return `${fullMatch[1].toUpperCase()} ${fullMatch[2].toUpperCase()}`;
-  }
-
-  // Outward code only (e.g. "SW6", "EC1A") — many listings omit the inward segment.
-  // Prefer the last match so titles like "… Lodge, SW6" resolve correctly.
-  const outwardMatches = [...text.matchAll(/\b([A-Z]{1,2}\d[A-Z0-9]?)\b/gi)];
-  for (let index = outwardMatches.length - 1; index >= 0; index -= 1) {
-    const raw = outwardMatches[index][1].toUpperCase();
-    if (raw.length < 2 || raw.length > 4) {
-      continue;
-    }
-    if (!/\d/.test(raw)) {
-      continue;
-    }
-    if (!/^[A-Z]{1,2}\d/.test(raw)) {
-      continue;
-    }
-    return raw;
-  }
-
-  return null;
-}
 
 function normalizeSearchLocation(value: string): string {
   return value
@@ -538,6 +519,7 @@ function parseComparablesFromDom(container: Element): RentComparable[] {
     if (el === container) continue;
 
     const text = (el.innerText || el.textContent || "").trim();
+    if (isLikelyRoomOrHouseShareLetting(text)) continue;
     const price = parsePriceFromText(text);
     if (!price) continue;
 
@@ -568,6 +550,8 @@ function parseComparablesFromDom(container: Element): RentComparable[] {
         availableFrom,
         source: "DOM rental section",
         bedrooms: extractBedroomsFromComparableText(text),
+        propertyType: inferComparablePropertyType(text),
+        floorAreaSqFt: extractFloorAreaSqFtFromComparableText(text),
       });
     }
   }
@@ -720,6 +704,28 @@ export function getPreferredLettingsSearchLocation(): LettingsSearchLocationHint
   return { kind: "text", value: top.value };
 }
 
+const FULL_UK_POSTCODE = /^[A-Z]{1,2}\d{1,2}[A-Z]?\s+\d[A-Z]{2}$/i;
+
+/**
+ * Prefer the scraped listing postcode for to-let searches so embedded `locationIdentifier`
+ * (which can resolve to the wrong region) never overrides a known DA/LE/etc. area.
+ */
+export function lettingsSearchHintFromListingProfile(
+  profile: ListingRentProfile,
+): LettingsSearchLocationHint | null {
+  const pc = profile.postcode?.trim() ?? "";
+  if (!pc) {
+    return null;
+  }
+  if (FULL_UK_POSTCODE.test(pc)) {
+    return { kind: "text", value: pc };
+  }
+  if (/^[A-Z]{1,2}\d[A-Z0-9]?$/i.test(pc) && pc.length <= 5) {
+    return { kind: "text", value: pc.toUpperCase() };
+  }
+  return null;
+}
+
 function rankRentSearchCandidates(
   candidates: RentSearchCandidate[],
 ): RentSearchCandidate[] {
@@ -728,12 +734,12 @@ function rankRentSearchCandidates(
   const scored = candidates.map((candidate) => {
     const value = candidate.value.trim();
     let score = 50;
-    if (candidate.isIdentifier) {
+    if (fullPostcode.test(value)) {
       score = 0;
-    } else if (fullPostcode.test(value)) {
-      score = 2;
+    } else if (candidate.isIdentifier) {
+      score = 3;
     } else if (/^[A-Z]{1,2}\d[A-Z0-9]?$/i.test(value) && value.length <= 4) {
-      score = 4;
+      score = 2;
     } else if (value.length <= 28) {
       score = 8;
     } else if (value.length <= 55) {

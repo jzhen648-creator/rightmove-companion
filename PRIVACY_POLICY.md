@@ -2,7 +2,7 @@
 
 **Published HTML copy:** `docs/privacy.html` — host with GitHub Pages (see README **Privacy policy URL**) and paste that **HTTPS** link under Chrome Web Store **Privacy practices**.
 
-**Effective date:** [set the date you publish]
+**Effective date:** May 2026
 
 ## Summary
 
@@ -30,8 +30,8 @@ If you build the extension yourself with a local **LLM proxy** URL, that proxy i
 
 ## Contact
 
-[Add an email or GitHub issues link where users can reach you.]
+Questions about this policy: use the contact option listed on the Rightmove Companion Chrome Web Store page, or open an issue at [github.com/jzhen648-creator/rightmove-companion/issues](https://github.com/jzhen648-creator/rightmove-companion/issues).
 
 ## Changes
 
-[Note material updates here when you change what the extension collects or sends.]
+Material updates to what the extension collects or sends will be noted here.

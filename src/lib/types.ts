@@ -26,6 +26,10 @@ export interface RentComparable {
   source?: string;
   /** Parsed from letting card text when possible (e.g. "2 bed flat"). */
   bedrooms?: number | null;
+  /** Normalized broad type for matching (e.g. "house", "flat"). */
+  propertyType?: "house" | "flat" | "other" | null;
+  /** Comparable floor area normalized to square feet when available. */
+  floorAreaSqFt?: number | null;
 }
 
 /** Structured for-sale listing context used for rent benchmarking. */
@@ -59,6 +63,72 @@ export interface RentEstimate {
   max: number;
   comparables: RentComparable[];
   source: string;
+}
+
+/** HM Land Registry Price Paid — property type slug. */
+export type SoldPropertyType =
+  | "detached"
+  | "semi-detached"
+  | "terraced"
+  | "flat-maisonette"
+  | "other";
+
+export interface SoldTransaction {
+  pricePaid: number;
+  /** ISO date (YYYY-MM-DD) parsed from Land Registry's "Fri, 14 Jun 2024" format. */
+  date: string;
+  propertyType: SoldPropertyType | null;
+  estateType: "freehold" | "leasehold" | null;
+  newBuild: boolean;
+  /**
+   * True for standard residential sales (category A). False for category B
+   * (repossessions, power-of-sale, some buy-to-let transfers) — excluded
+   * from comps by default because they skew the median down.
+   */
+  isStandardTransaction: boolean;
+  paon: string | null;
+  saon: string | null;
+  street: string | null;
+  postcode: string;
+}
+
+export interface PostcodeSalesSummary {
+  sampleSize: number;
+  medianPrice: number | null;
+  latestSaleDate: string | null;
+  /** Recency window the median was computed over. */
+  periodYears: number;
+  /** Total transactions in the postcode across the full dataset (since 1995). */
+  totalSince1995: number;
+  /** True when the summary was filtered to the listing's property type. */
+  filteredByPropertyType: boolean;
+}
+
+export interface SoldPriceHistory {
+  /** Exact-address matches for the listing, newest first. Empty when unknown. */
+  propertyTransactions: SoldTransaction[];
+  postcodeSummary: PostcodeSalesSummary | null;
+  /**
+   * Annualised growth implied by asking price vs the most recent exact-match
+   * sale. Null when there is no exact match or the sale is <1 year old
+   * (annualising very short periods produces junk numbers).
+   */
+  impliedAnnualGrowthVsAsking: number | null;
+  fetchedAt: number;
+  source: "hm-land-registry";
+}
+
+export interface ListingAddressHint {
+  /** Primary addressable object name — house number or building name. */
+  paon?: string | null;
+  /** Secondary — flat/unit within a building. */
+  saon?: string | null;
+}
+
+/** Per-listing draft persisted in chrome.storage.local. */
+export interface PageDraft {
+  inputs: InvestmentInputs;
+  soldPriceHistory?: SoldPriceHistory | null;
 }
 
 export interface GroundRentReview {

@@ -34,3 +34,15 @@ export function formatSavedAt(value: string): string {
   }).format(date);
 }
 
+export function formatIsoDateShort(value: string): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+

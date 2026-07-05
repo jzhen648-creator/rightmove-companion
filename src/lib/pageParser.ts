@@ -263,7 +263,7 @@ export function scanBodyTextForAskingPriceFallback(text: string): number | null 
 function findPriceFromPageText(): number | null {
   for (const selector of PRICE_FALLBACK_SCAN_ROOTS) {
     const root = document.querySelector(selector);
-    const scopedText = root?.innerText ?? "";
+    const scopedText = root instanceof HTMLElement ? root.innerText : "";
     if (scopedText) {
       const scopedPrice = scanBodyTextForAskingPriceFallback(scopedText);
       if (scopedPrice) {

@@ -8,8 +8,18 @@ import {
   parseZooplaToRentSearchHtml,
 } from "../lib/portalLettingsHtmlParse";
 import { parseLettingsSearchResultHtml } from "../lib/rentalLettingsSearchParse";
+import { filterComparablesToListingPostcodeArea } from "../lib/rentComparableLocality";
+import { filterWholePropertyLettingComparables } from "../lib/rentalSearchHtmlParser";
+import { buildPricePaidUrl, derivePricePaidInsights } from "../lib/pricePaid";
 import type { LettingsSearchLocationHint } from "../lib/rentEstimate";
-import type { ListingRentProfile, RentalAssessment, RentComparable } from "../lib/types";
+import type {
+  ListingAddressHint,
+  ListingRentProfile,
+  RentalAssessment,
+  RentComparable,
+  SoldPriceHistory,
+  SoldPropertyType,
+} from "../lib/types";
 import {
   RENT_COMP_MERGED_MAX,
   RENT_COMP_PRIMELOCATION_PARSE_MAX,
@@ -20,15 +30,20 @@ import { outwardPostcodeDistrict } from "../lib/ukPostcodeOutward";
 
 declare const __RMIA_LLM_PROXY_URL__: string;
 
-const FETCH_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
 type FetchRentalsMessage = {
   action: "fetchRentals";
   postcode: string;
   beds: number;
   listing: ListingRentProfile;
   lettingsLocationHint?: LettingsSearchLocationHint | null;
+};
+
+type FetchSoldPricesMessage = {
+  action: "fetchSoldPrices";
+  postcode: string;
+  addressHint?: ListingAddressHint | null;
+  propertyType?: SoldPropertyType | null;
+  askingPrice?: number | null;
 };
 
 function buildToLetSearchUrl(
@@ -88,7 +103,6 @@ async function fetchHtml(url: string): Promise<string | null> {
       redirect: "follow",
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "User-Agent": FETCH_UA,
       },
     });
     if (!response.ok) {
@@ -176,6 +190,57 @@ async function callLlmProxy(
   }
 }
 
+async function fetchPricePaidJson(url: string): Promise<unknown | null> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(url, {
+      credentials: "omit",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) {
+      console.debug("[RMIA] price paid fetch HTTP", response.status);
+      return null;
+    }
+    return await response.json();
+  } catch (error) {
+    console.debug("[RMIA] price paid fetch failed", error);
+    return null;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
+async function handleFetchSoldPrices(
+  message: FetchSoldPricesMessage,
+): Promise<SoldPriceHistory | null> {
+  const url = buildPricePaidUrl(message.postcode.trim());
+  if (!url) {
+    return null;
+  }
+
+  const raw = await fetchPricePaidJson(url);
+  if (raw === null) {
+    return null;
+  }
+
+  try {
+    return derivePricePaidInsights({
+      rawResponse: raw,
+      addressHint: message.addressHint ?? null,
+      propertyType: message.propertyType ?? null,
+      askingPrice: message.askingPrice ?? null,
+    });
+  } catch (error) {
+    console.debug("[RMIA] price paid parse error", error);
+    return null;
+  }
+}
+
 async function handleFetchRentals(
   message: FetchRentalsMessage,
 ): Promise<{
@@ -253,22 +318,35 @@ async function handleFetchRentals(
     RENT_COMP_MERGED_MAX,
   );
 
-  if (merged.length === 0) {
+  const afterShareFilter = filterWholePropertyLettingComparables(merged);
+  const comparables = filterComparablesToListingPostcodeArea(listing, afterShareFilter);
+
+  if (comparables.length === 0) {
+    let error: string;
+    if (merged.length === 0) {
+      error =
+        "No lettings could be parsed from Rightmove, Zoopla, or PrimeLocation. Try refreshing the page, or check that the postcode and address look correct.";
+    } else if (afterShareFilter.length === 0) {
+      error =
+        "Every nearby listing looked like a room or house-share advert, not a whole property, so they were excluded. Try widening the search or checking the postcode.";
+    } else {
+      error =
+        "Lettings were parsed but none matched this property’s postcode area — results looked like a different region. Try refreshing the page.";
+    }
     return {
       comparables: [],
       locationUsed: postcode,
       market: null,
       llm: null,
-      error:
-        "No lettings could be parsed from Rightmove, Zoopla, or PrimeLocation. Try refreshing the page, or check that the postcode and address look correct.",
+      error,
     };
   }
 
-  const market = deriveMarketRentalBand(listing, merged);
-  const llm = await callLlmProxy(listing, merged, market);
+  const market = deriveMarketRentalBand(listing, comparables);
+  const llm = await callLlmProxy(listing, comparables, market);
 
   return {
-    comparables: merged,
+    comparables,
     locationUsed: postcode,
     market,
     llm,
@@ -282,11 +360,16 @@ chrome.runtime.onMessage.addListener(
     }
 
     const record = message as Record<string, unknown>;
-    if (record.action !== "fetchRentals") {
-      return;
+    if (record.action === "fetchRentals") {
+      void handleFetchRentals(message as FetchRentalsMessage).then(sendResponse);
+      return true;
     }
 
-    void handleFetchRentals(message as FetchRentalsMessage).then(sendResponse);
-    return true;
+    if (record.action === "fetchSoldPrices") {
+      void handleFetchSoldPrices(message as FetchSoldPricesMessage).then(sendResponse);
+      return true;
+    }
+
+    return;
   },
 );

@@ -1,3 +1,5 @@
+import { isLikelyRoomOrHouseShareLetting } from "./rentalSearchHtmlParser";
+
 /**
  * Short, readable summary line for a rental comparable (portal card text is often noisy).
  * Safe to run in the UI on any `RentComparable.description`.
@@ -26,7 +28,14 @@ export function tidyComparableSummaryLine(raw: string): string {
   for (const re of marketing) {
     const m = s.match(re);
     if (m?.index != null && m.index >= 28) {
-      s = s.slice(0, m.index).trim();
+      const shortened = s.slice(0, m.index).trim();
+      if (
+        isLikelyRoomOrHouseShareLetting(s) &&
+        !isLikelyRoomOrHouseShareLetting(shortened)
+      ) {
+        continue;
+      }
+      s = shortened;
     }
   }
 
@@ -39,8 +48,15 @@ export function tidyComparableSummaryLine(raw: string): string {
   s = s.replace(/(?:\s*·\s*)+$/g, "").trim();
   s = s.replace(/\s{2,}/g, " ");
 
+  const share = isLikelyRoomOrHouseShareLetting(s);
   if (s.length > 130) {
-    s = `${s.slice(0, 127).trimEnd()}…`;
+    if (share) {
+      s = `House-share · ${s.slice(0, 100).trimEnd()}…`;
+    } else {
+      s = `${s.slice(0, 127).trimEnd()}…`;
+    }
+  } else if (share && !/\bhouse[-\s]+share\b/i.test(s)) {
+    s = `House-share · ${s}`;
   }
 
   return s || raw.replace(/\s+/g, " ").trim().slice(0, 120);

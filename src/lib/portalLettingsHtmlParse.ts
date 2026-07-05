@@ -3,6 +3,9 @@ import { parseHTML } from "linkedom";
 import { tidyComparableSummaryLine } from "./comparableDisplayTidy";
 import {
   extractBedroomsFromComparableText,
+  extractFloorAreaSqFtFromComparableText,
+  inferComparablePropertyType,
+  isLikelyRoomOrHouseShareLetting,
   parseRentPriceFromText,
 } from "./rentalSearchHtmlParser";
 import type { RentComparable } from "./types";
@@ -25,24 +28,48 @@ function absolutisePrimeLocation(href: string): string {
 }
 
 function collectCardText(anchor: Element): string {
-  const card =
-    anchor.closest("article") ??
-    anchor.closest("li") ??
-    anchor.closest('[class*="listing"]') ??
-    anchor.closest('[class*="Listing"]') ??
-    anchor.parentElement?.parentElement ??
-    anchor.parentElement;
-  const raw = (card?.textContent ?? anchor.textContent ?? "").replace(/\s+/g, " ").trim();
-  return raw;
+  const containerSelectors = [
+    "article",
+    '[class*="PropertyCard"]',
+    '[class*="propertyCard"]',
+    '[class*="ListingCard"]',
+    '[class*="listing-card"]',
+    '[class*="SearchResult"]',
+    '[class*="search-result"]',
+    '[class*="listing"]',
+    '[class*="Listing"]',
+    "li",
+  ];
+
+  let best = "";
+  for (const selector of containerSelectors) {
+    const el = anchor.closest(selector);
+    if (!el) {
+      continue;
+    }
+    const t = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (t.length > best.length && t.length < 12000) {
+      best = t;
+    }
+  }
+
+  let walk: Element | null = anchor;
+  for (let depth = 0; depth < 6 && walk; depth += 1, walk = walk.parentElement) {
+    const t = (walk.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (t.length > best.length && t.length < 12000) {
+      best = t;
+    }
+  }
+
+  return best || (anchor.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-/** Prefer the listing link’s own text; fall back to the wider card for price parsing only. */
+/** Use the richest card text so houseshare disclaimers are not dropped before filtering. */
 function pickDescriptionSnippet(anchor: Element): string {
+  const card = collectCardText(anchor);
   const direct = (anchor.textContent ?? "").replace(/\s+/g, " ").trim();
-  if (direct.length >= 14 && direct.length <= 220) {
-    return direct;
-  }
-  return collectCardText(anchor);
+  const merged = card.length >= direct.length ? card : direct;
+  return merged.slice(0, 900);
 }
 
 export function parseZooplaToRentSearchHtml(html: string, maximum: number): RentComparable[] {
@@ -60,6 +87,11 @@ export function parseZooplaToRentSearchHtml(html: string, maximum: number): Rent
     }
     const url = absolutiseZoopla(href);
     const textForPrice = collectCardText(anchor);
+    const rawSnippet = pickDescriptionSnippet(anchor);
+    const filterText = `${textForPrice}\n${rawSnippet}\n${url}`;
+    if (isLikelyRoomOrHouseShareLetting(filterText)) {
+      return;
+    }
     const price = parseRentPriceFromText(textForPrice);
     if (!price) {
       return;
@@ -69,13 +101,15 @@ export function parseZooplaToRentSearchHtml(html: string, maximum: number): Rent
       return;
     }
     seen.add(key);
-    const snippet = tidyComparableSummaryLine(pickDescriptionSnippet(anchor));
+    const snippet = tidyComparableSummaryLine(rawSnippet);
     out.push({
       price: roundToTwoDecimals(price),
       description: snippet || "Zoopla listing",
       url,
       source: "Zoopla",
       bedrooms: extractBedroomsFromComparableText(textForPrice),
+      propertyType: inferComparablePropertyType(textForPrice),
+      floorAreaSqFt: extractFloorAreaSqFtFromComparableText(textForPrice),
     });
   });
 
@@ -97,6 +131,11 @@ export function parsePrimeLocationToRentSearchHtml(html: string, maximum: number
     }
     const url = absolutisePrimeLocation(href);
     const textForPrice = collectCardText(anchor);
+    const rawSnippet = pickDescriptionSnippet(anchor);
+    const filterText = `${textForPrice}\n${rawSnippet}\n${url}`;
+    if (isLikelyRoomOrHouseShareLetting(filterText)) {
+      return;
+    }
     const price = parseRentPriceFromText(textForPrice);
     if (!price) {
       return;
@@ -106,13 +145,15 @@ export function parsePrimeLocationToRentSearchHtml(html: string, maximum: number
       return;
     }
     seen.add(key);
-    const snippet = tidyComparableSummaryLine(pickDescriptionSnippet(anchor));
+    const snippet = tidyComparableSummaryLine(rawSnippet);
     out.push({
       price: roundToTwoDecimals(price),
       description: snippet || "PrimeLocation listing",
       url,
       source: "PrimeLocation",
       bedrooms: extractBedroomsFromComparableText(textForPrice),
+      propertyType: inferComparablePropertyType(textForPrice),
+      floorAreaSqFt: extractFloorAreaSqFtFromComparableText(textForPrice),
     });
   });
 

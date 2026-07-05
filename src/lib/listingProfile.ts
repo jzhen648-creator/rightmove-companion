@@ -1,5 +1,5 @@
 // Structured for-sale listing fields for rental benchmarking (best-effort DOM scrape).
-import { findPostcode } from "./rentEstimate";
+import { findPostcode } from "./ukPostcodeOutward";
 import type { ListingRentProfile, RightmovePageInfo } from "./types";
 
 const DESCRIPTION_SELECTORS = [
@@ -18,11 +18,43 @@ function firstMatchInt(text: string, pattern: RegExp): number | null {
   return Number.isFinite(value) && value >= 0 && value <= 30 ? value : null;
 }
 
-function extractPropertyType(corpus: string): string | null {
-  const match = corpus.match(
-    /\b(flat|apartment|house|bungalow|maisonette|penthouse|studio|duplex|mews|townhouse|cottage)\b/i,
+function normalizePropertyTypeToken(value: string): string | null {
+  const token = value.trim().toLowerCase();
+  if (!token) {
+    return null;
+  }
+  if (/\b(flat|apartment|maisonette|penthouse|studio|duplex)\b/i.test(token)) {
+    return "Flat";
+  }
+  if (
+    /\b(house|bungalow|cottage|mews|townhouse|semi-detached|detached|terraced)\b/i.test(
+      token,
+    )
+  ) {
+    return "House";
+  }
+  return null;
+}
+
+function extractPropertyType(primaryCorpus: string, pageText: string): string | null {
+  const scoped = primaryCorpus.match(
+    /\b(flat|apartment|house|bungalow|maisonette|penthouse|studio|duplex|mews|townhouse|cottage|semi-detached|detached|terraced)\b/i,
   );
-  return match ? match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase() : null;
+  if (scoped) {
+    return normalizePropertyTypeToken(scoped[1]);
+  }
+
+  const propertyTypeLine = pageText.match(
+    /\bproperty\s*type\b[\s:|-]*([A-Za-z][A-Za-z\s-]{2,40})/i,
+  );
+  if (propertyTypeLine) {
+    const normalized = normalizePropertyTypeToken(propertyTypeLine[1]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
 }
 
 function extractTenure(corpus: string): string | null {
@@ -92,13 +124,14 @@ export function extractListingRentProfile(
     document.querySelector("h1")?.textContent?.replace(/\s+/g, " ").trim() ||
     pageInfo.address;
 
-  const corpus = [
+  const scopedCorpus = [
     headline,
     pageInfo.title,
     pageInfo.address,
     document.title,
-    document.body?.innerText ?? "",
   ].join("\n");
+  const pageText = document.body?.innerText ?? "";
+  const corpus = `${scopedCorpus}\n${pageText}`;
 
   const postcode = findPostcode(corpus);
 
@@ -108,7 +141,7 @@ export function extractListingRentProfile(
     postcode,
     beds: firstMatchInt(corpus, /\b(\d+)\s*(?:bed|bedroom)s?\b/i),
     baths: firstMatchInt(corpus, /\b(\d+)\s*(?:bath|bathroom)s?\b/i),
-    propertyType: extractPropertyType(corpus),
+    propertyType: extractPropertyType(scopedCorpus, pageText),
     tenure: extractTenure(corpus),
     floorAreaSqFt: pageInfo.floorAreaSqFt,
     keyFeatures: collectKeyFeatures(),

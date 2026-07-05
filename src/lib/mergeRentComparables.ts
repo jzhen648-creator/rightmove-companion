@@ -1,3 +1,4 @@
+import { filterWholePropertyLettingComparables } from "./rentalSearchHtmlParser";
 import type { RentComparable } from "./types";
 
 function dedupeKey(item: RentComparable): string {
@@ -25,7 +26,7 @@ export function mergeRentComparablesFromSources(
   const out: RentComparable[] = [];
 
   for (const bucket of buckets) {
-    for (const raw of bucket.items) {
+    for (const raw of filterWholePropertyLettingComparables(bucket.items)) {
       const item: RentComparable = {
         ...raw,
         source: raw.source?.trim() || bucket.source,

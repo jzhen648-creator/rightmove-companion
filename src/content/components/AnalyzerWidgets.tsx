@@ -1,9 +1,136 @@
 import { useState, type ReactElement } from "react";
-import { formatCurrency } from "../../lib/formatters";
+import { formatCurrency, formatIsoDateShort } from "../../lib/formatters";
 import { INVESTOR_SCORE_CONFIG } from "../../lib/investorScore";
-import type { RentEstimate, Verdict } from "../../lib/types";
+import type {
+  PostcodeSalesSummary,
+  RentEstimate,
+  SoldPriceHistory,
+  SoldPropertyType,
+  SoldTransaction,
+  Verdict,
+} from "../../lib/types";
 import type { NumberFieldDefinition, ToggleOption } from "../fieldMeta";
 import { parseInputNumber, scoreConfidenceLabel, verdictLabel } from "../stateHelpers";
+
+function soldPropertyTypeLabel(type: SoldPropertyType | null): string {
+  if (!type) {
+    return "sales";
+  }
+  switch (type) {
+    case "semi-detached":
+      return "semi-detached sales";
+    case "flat-maisonette":
+      return "flat/maisonette sales";
+    case "other":
+      return "sales";
+    default:
+      return `${type} sales`;
+  }
+}
+
+function formatPostcodeSummaryLine(
+  summary: PostcodeSalesSummary,
+  postcode: string,
+  propertyType: SoldPropertyType | null,
+): string {
+  const median =
+    summary.medianPrice != null ? formatCurrency(summary.medianPrice) : "n/a";
+  const typePhrase = summary.filteredByPropertyType
+    ? soldPropertyTypeLabel(propertyType)
+    : "sales";
+  const suffix = summary.filteredByPropertyType ? "" : " — all property types";
+  return `${summary.sampleSize} ${typePhrase} in ${postcode} in the last ${summary.periodYears} years, median ${median} (${summary.totalSince1995} sales since 1995)${suffix}`;
+}
+
+function hasSoldPriceContent(history: SoldPriceHistory | null): boolean {
+  if (!history) {
+    return false;
+  }
+  return (
+    history.propertyTransactions.length > 0 || history.postcodeSummary !== null
+  );
+}
+
+/** Collapsible HM Land Registry sold-price context near the asking-price field. */
+export function SoldPriceHistorySection(props: {
+  expanded: boolean;
+  loading: boolean;
+  history: SoldPriceHistory | null;
+  postcode: string | null;
+  propertyType: SoldPropertyType | null;
+  onToggle: (expanded: boolean) => void;
+}) {
+  const { expanded, loading, history, postcode, propertyType, onToggle } = props;
+  const hasContent = hasSoldPriceContent(history);
+
+  return (
+    <details
+      className="rmia-rent-details rmia-sold-price-details rmia-field--span-2"
+      open={expanded}
+      onToggle={(event) => onToggle((event.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>Sold price history</summary>
+      {loading && !hasContent ? (
+        <p className="rmia-field-helper">Loading Land Registry data…</p>
+      ) : null}
+      {!loading && expanded && !hasContent ? (
+        <p className="rmia-field-helper">No Land Registry data available</p>
+      ) : null}
+      {hasContent && history ? (
+        <div className="rmia-sold-price-body">
+          {history.propertyTransactions.length > 0 ? (
+            <div className="rmia-sold-price-block">
+              <span className="rmia-result-label">This property</span>
+              <table className="rmia-sold-price-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Price</th>
+                    <th scope="col">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.propertyTransactions.map((row: SoldTransaction, index) => (
+                    <tr key={`${row.date}-${row.pricePaid}-${index}`}>
+                      <td>{formatIsoDateShort(row.date)}</td>
+                      <td>{formatCurrency(row.pricePaid)}</td>
+                      <td>{row.newBuild ? "New build" : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {history.propertyTransactions[0] ? (
+                <p className="rmia-field-helper">
+                  Last sold {formatCurrency(history.propertyTransactions[0].pricePaid)} on{" "}
+                  {formatIsoDateShort(history.propertyTransactions[0].date)}
+                  {history.impliedAnnualGrowthVsAsking != null
+                    ? `. Implied growth vs asking: ${(history.impliedAnnualGrowthVsAsking * 100).toFixed(1)}%/yr since ${formatIsoDateShort(history.propertyTransactions[0].date)}`
+                    : null}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {history.propertyTransactions.length === 0 &&
+          history.postcodeSummary &&
+          postcode ? (
+            <p className="rmia-field-helper">
+              {formatPostcodeSummaryLine(history.postcodeSummary, postcode, propertyType)}
+            </p>
+          ) : null}
+          {history.propertyTransactions.length > 0 &&
+          history.postcodeSummary &&
+          postcode ? (
+            <p className="rmia-field-helper">
+              Postcode context:{" "}
+              {formatPostcodeSummaryLine(history.postcodeSummary, postcode, propertyType)}
+            </p>
+          ) : null}
+          <p className="rmia-field-note">Source: HM Land Registry Price Paid data</p>
+        </div>
+      ) : null}
+    </details>
+  );
+}
 
 /** Semi-circular range + central estimate (Propeller-style at-a-glance rent band). */
 export function RentRangeGauge(props: {

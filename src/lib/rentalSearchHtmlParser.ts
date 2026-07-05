@@ -148,6 +148,107 @@ export function extractBedroomsFromComparableText(text: string): number | null {
   return Number.isFinite(value) && value >= 0 && value <= 30 ? value : null;
 }
 
+export function extractFloorAreaSqFtFromComparableText(text: string): number | null {
+  const sqFtMatch = text.match(/\b([\d,]+(?:\.\d+)?)\s*(?:sq\.?\s*ft|sqft|ft²|ft2)\b/i);
+  if (sqFtMatch) {
+    const value = Number.parseFloat(sqFtMatch[1].replace(/,/g, ""));
+    if (Number.isFinite(value) && value >= 100 && value <= 20000) {
+      return Math.round(value);
+    }
+  }
+
+  const sqmMatch = text.match(/\b([\d,]+(?:\.\d+)?)\s*(?:sq\.?\s*m|sqm|m²|m2)\b/i);
+  if (sqmMatch) {
+    const sqm = Number.parseFloat(sqmMatch[1].replace(/,/g, ""));
+    if (Number.isFinite(sqm) && sqm >= 10 && sqm <= 2000) {
+      return Math.round(sqm * 10.7639);
+    }
+  }
+
+  return null;
+}
+
+export function inferComparablePropertyType(text: string): "house" | "flat" | "other" | null {
+  const raw = text.trim();
+  if (!raw) {
+    return null;
+  }
+  if (
+    /\b(flat|apartment|maisonette|penthouse|studio|duplex)\b/i.test(raw)
+  ) {
+    return "flat";
+  }
+  if (
+    /\b(house|bungalow|cottage|mews|townhouse|semi-detached|detached|terraced)\b/i.test(raw)
+  ) {
+    return "house";
+  }
+  return "other";
+}
+
+/**
+ * True when text looks like a single-room / house-share / HMO let rather than a whole property.
+ * Whole-property rent estimates must exclude these or medians collapse toward room rates.
+ */
+export function isLikelyRoomOrHouseShareLetting(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) {
+    return false;
+  }
+
+  if (/\bhouse\s*share\b/.test(t)) return true;
+  if (/\bhouse[-\s]+share\b/.test(t)) return true;
+  if (/\bflat\s*share\b/.test(t)) return true;
+  if (/\broom\s*share\b/.test(t)) return true;
+  if (/\b(?:pleased|delighted)\s+to\s+offer\b[\s\S]{0,220}\brooms?\s+within\b/i.test(t)) {
+    return true;
+  }
+  if (/\bto\s+offer\s+\d+\s+delightful\s+rooms?\b/i.test(t)) return true;
+  // Truncated UI copy often ends at "shared hou…" — still a house-share signal.
+  if (/\bshared\s+hou(?:se)?\b/.test(t)) return true;
+  if (/\bshared\s+(?:house|flat|accommodation|property|home)\b/.test(t)) return true;
+  if (/\b(?:single|double|twin)\s+room\b/.test(t)) return true;
+  if (/\broom\s+to\s+let\b/.test(t)) return true;
+  if (/\brooms?\s+within\b/.test(t)) return true;
+  if (/\bdelightful\s+rooms?\b/.test(t)) return true;
+  if (/\bco-?living\b/.test(t)) return true;
+  if (
+    /\broom\s+in\s+(?:a|an|the)\s+(?:shared\s+)?(?:house|flat|property|hmo)\b/.test(t)
+  ) {
+    return true;
+  }
+  if (/\bhmo\b/.test(t)) return true;
+  if (/\bhouse\s+in\s+multiple\s+occupation\b/.test(t)) return true;
+  if (/\blodger\b/.test(t)) return true;
+  if (/\bper\s+room\b/.test(t)) return true;
+  if (/\bbed\s*space\b/.test(t)) return true;
+  if (/\bensuite\s+room\b/.test(t)) return true;
+  if (/\b(?:offer|offering|available)\s+\d+\s+(?:delightful\s+)?rooms?\b/.test(t)) {
+    return true;
+  }
+  if (/\bspare\s+room\s+available\b/.test(t)) return true;
+  if (/\b(?:inclusive\s+)?bills\s+included\b/.test(t) && /\broom\b/.test(t)) {
+    return true;
+  }
+
+  if (/\/(?:house|flat|room)[_-]?share\b/i.test(t)) return true;
+
+  return false;
+}
+
+/** Signals for filtering (description is often truncated in the UI). */
+function comparableTextForShareFilter(row: RentComparable): string {
+  return [row.description, row.url ?? ""].filter(Boolean).join("\n");
+}
+
+export function filterWholePropertyLettingComparables(
+  items: RentComparable[],
+): RentComparable[] {
+  return items.filter(
+    (row) => !isLikelyRoomOrHouseShareLetting(comparableTextForShareFilter(row)),
+  );
+}
+
 function coerceBedroomCountFromJson(
   value: unknown,
   description: string,
@@ -162,6 +263,34 @@ function coerceBedroomCountFromJson(
     }
   }
   return extractBedroomsFromComparableText(description);
+}
+
+function coerceFloorAreaSqFtFromJson(value: unknown, description: string): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 100 && value <= 20000) {
+      return Math.round(value);
+    }
+    // Common metric input in sqm.
+    if (value >= 10 && value <= 2000) {
+      return Math.round(value * 10.7639);
+    }
+  }
+  if (typeof value === "string") {
+    const fromText = extractFloorAreaSqFtFromComparableText(value);
+    if (fromText !== null) {
+      return fromText;
+    }
+    const numeric = Number.parseFloat(value.replace(/,/g, ""));
+    if (Number.isFinite(numeric)) {
+      if (numeric >= 100 && numeric <= 20000) {
+        return Math.round(numeric);
+      }
+      if (numeric >= 10 && numeric <= 2000) {
+        return Math.round(numeric * 10.7639);
+      }
+    }
+  }
+  return extractFloorAreaSqFtFromComparableText(description);
 }
 
 export function parseComparablesFromJson(root: unknown): RentComparable[] {
@@ -193,11 +322,33 @@ export function parseComparablesFromJson(root: unknown): RentComparable[] {
       record.displayAddress ?? record.address ?? record.description ?? "",
     ).trim();
 
+    const signalText = [
+      description,
+      typeof record.summary === "string" ? record.summary : "",
+      typeof record.title === "string" ? record.title : "",
+      typeof record.displayTitle === "string" ? record.displayTitle : "",
+      typeof record.teaser === "string" ? record.teaser : "",
+    ]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ");
+    if (isLikelyRoomOrHouseShareLetting(signalText)) {
+      return [];
+    }
+
     const bedrooms = coerceBedroomCountFromJson(
       record.bedrooms ??
         record.beds ??
         record.numberOfBedrooms ??
         record.bedroomCount,
+      description,
+    );
+    const floorAreaSqFt = coerceFloorAreaSqFtFromJson(
+      record.floorAreaSqFt ??
+        record.floorArea ??
+        record.floorAreaValue ??
+        record.sizeSqFt ??
+        record.size,
       description,
     );
 
@@ -224,6 +375,16 @@ export function parseComparablesFromJson(root: unknown): RentComparable[] {
         availableFrom,
         source: "embedded JSON",
         bedrooms,
+        propertyType: inferComparablePropertyType(
+          String(
+            record.propertyType ??
+              record.propertySubType ??
+              record.type ??
+              record.propertyStyle ??
+              description,
+          ),
+        ),
+        floorAreaSqFt,
       },
     ];
   });
@@ -296,6 +457,8 @@ function parseNearbyRentalComparables(doc: Document, maximum = 10): RentComparab
       if (comparables.length >= maximum) break;
 
       const text = getNodeVisibleText(card);
+      if (isLikelyRoomOrHouseShareLetting(text)) continue;
+
       const price = parseRentPriceFromText(text);
       if (!price) continue;
 
@@ -320,6 +483,8 @@ function parseNearbyRentalComparables(doc: Document, maximum = 10): RentComparab
         availableFrom: undefined,
         source: `search card (${selector})`,
         bedrooms: extractBedroomsFromComparableText(text),
+        propertyType: inferComparablePropertyType(text),
+        floorAreaSqFt: extractFloorAreaSqFtFromComparableText(text),
       });
       if (comparables.length >= maximum) break;
     }
@@ -341,6 +506,8 @@ function parseNearbyRentalComparables(doc: Document, maximum = 10): RentComparab
       break;
     }
 
+    if (isLikelyRoomOrHouseShareLetting(line)) continue;
+
     const price = parseRentPriceFromText(line);
     if (!price) continue;
 
@@ -355,6 +522,8 @@ function parseNearbyRentalComparables(doc: Document, maximum = 10): RentComparab
       availableFrom: undefined,
       source: "search page text",
       bedrooms: extractBedroomsFromComparableText(line),
+      propertyType: inferComparablePropertyType(line),
+      floorAreaSqFt: extractFloorAreaSqFtFromComparableText(line),
     });
   }
 

@@ -1104,6 +1104,33 @@
   content: " ▲";
 }
 
+.rmia-sold-price-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rmia-sold-price-table th,
+.rmia-sold-price-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.rmia-sold-price-table th {
+  font-weight: 700;
+  color: #334155;
+}
+
+.rmia-sold-price-body {
+  margin-top: 8px;
+}
+
+.rmia-sold-price-block + .rmia-field-helper {
+  margin-top: 8px;
+}
+
 .rmia-comparables-details .rmia-comparables-list {
   margin-top: 10px;
 }

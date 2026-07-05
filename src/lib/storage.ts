@@ -1,6 +1,6 @@
 // Wrapper functions around chrome.storage.local so the UI code stays simple.
 import { parseDealRecordsForImport } from "./savedDealsCodec";
-import type { DealRecord, InvestmentInputs } from "./types";
+import type { DealRecord, InvestmentInputs, PageDraft, SoldPriceHistory } from "./types";
 
 const STORAGE_KEYS = {
   defaultSettings: "rmia_default_settings",
@@ -102,21 +102,67 @@ export async function saveDefaultSettings(settings: Partial<InvestmentInputs>): 
   assertWriteOk(result, "Saving default settings");
 }
 
+function normalizePageDraft(
+  raw: PageDraft | InvestmentInputs | undefined,
+): PageDraft | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  if (typeof raw === "object" && "inputs" in raw && raw.inputs) {
+    return raw as PageDraft;
+  }
+  return { inputs: raw as InvestmentInputs };
+}
+
 export async function getPageDraft(pageUrl: string): Promise<InvestmentInputs | undefined> {
   const drafts =
-    (await storageGet<Record<string, InvestmentInputs>>(STORAGE_KEYS.pageDrafts)) ?? {};
+    (await storageGet<Record<string, PageDraft | InvestmentInputs>>(STORAGE_KEYS.pageDrafts)) ??
+    {};
 
-  return drafts[pageUrl];
+  return normalizePageDraft(drafts[pageUrl])?.inputs;
+}
+
+export async function getPageDraftSoldPriceHistory(
+  pageUrl: string,
+): Promise<SoldPriceHistory | null | undefined> {
+  const drafts =
+    (await storageGet<Record<string, PageDraft | InvestmentInputs>>(STORAGE_KEYS.pageDrafts)) ??
+    {};
+
+  return normalizePageDraft(drafts[pageUrl])?.soldPriceHistory;
 }
 
 export async function savePageDraft(pageUrl: string, inputs: InvestmentInputs): Promise<void> {
   const drafts =
-    (await storageGet<Record<string, InvestmentInputs>>(STORAGE_KEYS.pageDrafts)) ?? {};
+    (await storageGet<Record<string, PageDraft | InvestmentInputs>>(STORAGE_KEYS.pageDrafts)) ??
+    {};
 
-  drafts[pageUrl] = inputs;
+  const existing = normalizePageDraft(drafts[pageUrl]);
+  drafts[pageUrl] = {
+    inputs,
+    ...(existing?.soldPriceHistory !== undefined
+      ? { soldPriceHistory: existing.soldPriceHistory }
+      : {}),
+  };
   const result = await storageSet(STORAGE_KEYS.pageDrafts, drafts);
   if (!result.ok && !isBenignInvalidatedContextMessage(result.errorMessage)) {
     console.warn("[Companion] Could not save page draft:", result.errorMessage);
+  }
+}
+
+export async function savePageDraftSoldPriceHistory(
+  pageUrl: string,
+  soldPriceHistory: SoldPriceHistory | null,
+  inputs: InvestmentInputs,
+): Promise<void> {
+  const drafts =
+    (await storageGet<Record<string, PageDraft | InvestmentInputs>>(STORAGE_KEYS.pageDrafts)) ??
+    {};
+
+  drafts[pageUrl] = { inputs, soldPriceHistory };
+  const result = await storageSet(STORAGE_KEYS.pageDrafts, drafts);
+  if (!result.ok && !isBenignInvalidatedContextMessage(result.errorMessage)) {
+    console.warn("[Companion] Could not save sold price cache:", result.errorMessage);
   }
 }
 

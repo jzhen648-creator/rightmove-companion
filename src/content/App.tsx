@@ -17,14 +17,23 @@ import {
 import { parseRightmovePage } from "../lib/pageParser";
 import { tidyComparableSummaryLine } from "../lib/comparableDisplayTidy";
 import { extractListingRentProfile } from "../lib/listingProfile";
-import { getPreferredLettingsSearchLocation } from "../lib/rentEstimate";
+import {
+  deriveListingAddressHint,
+  inferSoldPropertyTypeFromListing,
+} from "../lib/listingAddressHint";
 import { fetchRentalsViaBackground } from "../lib/rentalBackgroundBridge";
+import { fetchSoldPricesViaBackground } from "../lib/soldPriceBackgroundBridge";
+import {
+  getPreferredLettingsSearchLocation,
+  lettingsSearchHintFromListingProfile,
+} from "../lib/rentEstimate";
 import { buildBuyToLetEvaluationSummary } from "../lib/resultEvaluation";
 import { serialiseDealsForExport } from "../lib/savedDealsCodec";
 import {
   deleteSavedDeal,
   getIsPanelOpen,
   getPageDraft,
+  getPageDraftSoldPriceHistory,
   getSavedDeals,
   getSavedSettings,
   importSavedDealsFromJson,
@@ -33,6 +42,7 @@ import {
   saveDefaultSettings,
   saveIsPanelOpen,
   savePageDraft,
+  savePageDraftSoldPriceHistory,
 } from "../lib/storage";
 import type {
   DealRecord,
@@ -44,6 +54,8 @@ import type {
   RentComparable,
   RightmovePageInfo,
   SdltResidenceType,
+  SoldPriceHistory,
+  SoldPropertyType,
 } from "../lib/types";
 import {
   depositAmountField,
@@ -79,6 +91,7 @@ import {
   RentRangeGauge,
   ResultCard,
   ScoreSummaryBox,
+  SoldPriceHistorySection,
   ToggleField,
 } from "./components/AnalyzerWidgets";
 import { useRightmoveParseRefresh } from "./hooks/useRightmoveParseRefresh";
@@ -86,6 +99,15 @@ import { useRightmoveParseRefresh } from "./hooks/useRightmoveParseRefresh";
 type ActiveTab = "calculator" | "rent" | "saved";
 
 type SavedDealSort = "newest" | "oldest" | "score-high" | "score-low";
+
+const SOLD_PRICE_CACHE_MS = 24 * 60 * 60 * 1000;
+
+function isSoldPriceCacheFresh(history: SoldPriceHistory | null | undefined): boolean {
+  if (!history?.fetchedAt) {
+    return false;
+  }
+  return Date.now() - history.fetchedAt < SOLD_PRICE_CACHE_MS;
+}
 
 function useFilteredSortedDeals(
   deals: DealRecord[],
@@ -165,6 +187,13 @@ export default function App() {
     market: null,
     llm: null,
   });
+  const [soldPriceHistory, setSoldPriceHistory] = useState<SoldPriceHistory | null>(null);
+  const [soldPriceLoading, setSoldPriceLoading] = useState(false);
+  const [soldPriceExpanded, setSoldPriceExpanded] = useState(false);
+  const soldPriceHistoryRef = useRef<SoldPriceHistory | null>(null);
+  const soldPriceFetchInFlight = useRef(false);
+
+  soldPriceHistoryRef.current = soldPriceHistory;
 
   const visibleSavedDeals = useFilteredSortedDeals(
     savedDeals,
@@ -188,12 +217,13 @@ export default function App() {
         "Loading property details... (2/3) Reading saved settings, saved deals, and panel state.",
       );
 
-      const [savedSettings, pageDraft, existingSavedDeals, savedPanelOpen] =
+      const [savedSettings, pageDraft, existingSavedDeals, savedPanelOpen, cachedSoldPrice] =
         await Promise.all([
           getSavedSettings(),
           getPageDraft(detectedPageInfo.url),
           getSavedDeals(),
           getIsPanelOpen(),
+          getPageDraftSoldPriceHistory(detectedPageInfo.url),
         ]);
 
       if (cancelled) {
@@ -210,6 +240,9 @@ export default function App() {
         (deal) => deal.id === detectedPageInfo.url,
       );
       setSaveDealNotesDraft(existingForPage?.notes ?? "");
+      if (cachedSoldPrice && isSoldPriceCacheFresh(cachedSoldPrice)) {
+        setSoldPriceHistory(cachedSoldPrice);
+      }
       setStatusMessage(
         "Loading property details... (3/3) Finalizing the panel and showing results.",
       );
@@ -224,6 +257,28 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    let cancelled = false;
+    void getPageDraftSoldPriceHistory(pageInfo.url).then((cached) => {
+      if (cancelled) {
+        return;
+      }
+      if (cached && isSoldPriceCacheFresh(cached)) {
+        setSoldPriceHistory(cached);
+      } else {
+        setSoldPriceHistory(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, pageInfo.url]);
 
   useEffect(() => {
     if (!isReady) {
@@ -296,7 +351,9 @@ export default function App() {
     }));
 
     const beds = profile.beds ?? 0;
-    const lettingsHint = getPreferredLettingsSearchLocation();
+    const lettingsHint =
+      lettingsSearchHintFromListingProfile(profile) ??
+      getPreferredLettingsSearchLocation();
     void fetchRentalsViaBackground(postcode, beds, profile, lettingsHint).then((response) => {
       if (cancelled) {
         return;
@@ -333,6 +390,66 @@ export default function App() {
     };
   }, [isReady, inputs.propertyGoal, pageInfo]);
 
+  useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    const profile = extractListingRentProfile(pageInfo);
+    const postcode = profile.postcode;
+    if (!postcode) {
+      return;
+    }
+    if (isSoldPriceCacheFresh(soldPriceHistoryRef.current)) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled || soldPriceFetchInFlight.current) {
+        return;
+      }
+
+      soldPriceFetchInFlight.current = true;
+      setSoldPriceLoading(true);
+
+      const addressHint = deriveListingAddressHint(pageInfo.address);
+      const propertyType = inferSoldPropertyTypeFromListing(
+        pageInfo.address,
+        profile.propertyType,
+      );
+      const askingPrice =
+        inputs.askingPrice > 0 ? inputs.askingPrice : (pageInfo.askingPrice ?? null);
+
+      void fetchSoldPricesViaBackground(
+        postcode,
+        addressHint,
+        propertyType,
+        askingPrice,
+      ).then((result) => {
+        soldPriceFetchInFlight.current = false;
+        if (cancelled) {
+          return;
+        }
+        setSoldPriceLoading(false);
+        if (result) {
+          setSoldPriceHistory(result);
+          void savePageDraftSoldPriceHistory(pageInfo.url, result, inputs);
+        }
+      });
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isReady,
+    pageInfo,
+    inputs.askingPrice,
+    inputs,
+  ]);
+
   const propertyGoalConfig = getPropertyGoalConfig(inputs.propertyGoal);
   const calculationInputs = getCalculationInputsForPropertyGoal(inputs);
   const results = calculateInvestmentMetrics(calculationInputs, pageInfo);
@@ -343,6 +460,52 @@ export default function App() {
     pageInfo.floorAreaSqFt && inputs.askingPrice > 0
       ? inputs.askingPrice / pageInfo.floorAreaSqFt
       : null;
+  const listingRentProfile = useMemo(
+    () => extractListingRentProfile(pageInfo),
+    [pageInfo],
+  );
+  const soldPricePostcode = listingRentProfile.postcode;
+  const soldPricePropertyType = useMemo(
+    (): SoldPropertyType | null =>
+      inferSoldPropertyTypeFromListing(
+        pageInfo.address,
+        listingRentProfile.propertyType,
+      ),
+    [pageInfo.address, listingRentProfile.propertyType],
+  );
+
+  const requestSoldPricesOnExpand = (): void => {
+    if (!isReady || soldPriceFetchInFlight.current) {
+      return;
+    }
+    const postcode = listingRentProfile.postcode;
+    if (!postcode) {
+      return;
+    }
+    if (isSoldPriceCacheFresh(soldPriceHistoryRef.current)) {
+      return;
+    }
+
+    soldPriceFetchInFlight.current = true;
+    setSoldPriceLoading(true);
+    const addressHint = deriveListingAddressHint(pageInfo.address);
+    const askingPrice =
+      inputs.askingPrice > 0 ? inputs.askingPrice : (pageInfo.askingPrice ?? null);
+
+    void fetchSoldPricesViaBackground(
+      postcode,
+      addressHint,
+      soldPricePropertyType,
+      askingPrice,
+    ).then((result) => {
+      soldPriceFetchInFlight.current = false;
+      setSoldPriceLoading(false);
+      if (result) {
+        setSoldPriceHistory(result);
+        void savePageDraftSoldPriceHistory(pageInfo.url, result, inputs);
+      }
+    });
+  };
 
   const rentHeroBand = useMemo(() => {
     if (rentFromSearch.llm) {
@@ -847,6 +1010,22 @@ export default function App() {
                       updateNumberField("askingPrice", value)
                     }
                   />
+
+                  {soldPricePostcode ? (
+                    <SoldPriceHistorySection
+                      expanded={soldPriceExpanded}
+                      loading={soldPriceLoading}
+                      history={soldPriceHistory}
+                      postcode={soldPricePostcode}
+                      propertyType={soldPricePropertyType}
+                      onToggle={(expanded) => {
+                        setSoldPriceExpanded(expanded);
+                        if (expanded) {
+                          requestSoldPricesOnExpand();
+                        }
+                      }}
+                    />
+                  ) : null}
 
                   {propertyGoalConfig.showRentField ? (
                     <NumberField

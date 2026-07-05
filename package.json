@@ -4,12 +4,19 @@
   "private": true,
   "type": "module",
   "description": "Rightmove Companion — local Chrome extension for costs, finance, rent context, and buy-to-let tools on Rightmove for-sale listings.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jzhen648-creator/rightmove-companion.git"
+  },
+  "homepage": "https://github.com/jzhen648-creator/rightmove-companion#readme",
   "scripts": {
     "build": "vite build",
     "build:store": "vite build --mode store",
     "dev": "vite build --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json",
     "icons": "node scripts/generate-icons.js",
     "lint": "eslint src"
   },
